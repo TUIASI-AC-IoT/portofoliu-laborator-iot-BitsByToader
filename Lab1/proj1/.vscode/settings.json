@@ -1,0 +1,12 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.openOcdConfigs": [
+    "board/esp32-ethernet-kit-3.3v.cfg"
+  ],
+  "idf.currentSetup": "/home/tudor/.espressif/v5.5.2/esp-idf",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32"
+  },
+  "idf.port": "/dev/ttyUSB1",
+  "idf.flashType": "UART"
+}
