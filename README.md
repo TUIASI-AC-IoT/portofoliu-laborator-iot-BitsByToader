@@ -1,1 +1,1 @@
-Laboratoare ptr materia IoT.
+Laboratoare pentru materia IoT.
