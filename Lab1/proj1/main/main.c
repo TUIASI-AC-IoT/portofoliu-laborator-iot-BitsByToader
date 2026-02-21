@@ -10,8 +10,25 @@
 #define BTN_INPUT_IO        2
 #define BTN_INPUT_PIN_SEL   (1ULL<<BTN_INPUT_IO)
 
-void button_task() {
+void button_task(void *params) {
+    int btn_state_prev = gpio_get_level(BTN_INPUT_IO);
+    
+    for(;;) {
+        int btn_state = gpio_get_level(BTN_INPUT_IO);
+        if (btn_state != btn_state_prev) { // got a change
+            // wait for 200ms to settle
+            vTaskDelay(pdMS_TO_TICKS(200));
 
+            int btn_state = gpio_get_level(BTN_INPUT_IO);
+            if (btn_state != btn_state_prev) {
+                // btn kept its value
+                printf("debounced btn: %d\n", btn_state);
+            }
+        }
+        
+        btn_state_prev = btn_state;
+        vTaskDelay(pdMS_TO_TICKS(1)); // 1ms delay
+    }
 }
 
 void app_main() {
@@ -41,11 +58,14 @@ void app_main() {
     };
     gpio_config(&btn_conf);
 
+    // create task for button mgmt
+    TaskHandle_t btn_task_h = NULL;
+    xTaskCreate(button_task, "BTN_TASK", 16, NULL, 2, &btn_task_h); // prio 2, 16 stack size
+
     int cnt = 0;
     while(1) {
         printf("cnt: %d\n", cnt++);
         vTaskDelay(1000 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_OUTPUT_IO, cnt % 2);
-        printf("btn %d\n", gpio_get_level(BTN_INPUT_IO));
     }
 }
