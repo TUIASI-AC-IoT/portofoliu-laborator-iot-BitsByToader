@@ -21,16 +21,15 @@ void button_task(void *params) {
 
             btn_state = gpio_get_level(BTN_INPUT_IO);
             if (btn_state != btn_state_prev) {
-                // btn kept its value
-                printf("debounced short btn: %d\n", btn_state);
-            }
-
-            // wait for 500ms for long press
-            vTaskDelay(pdMS_TO_TICKS(500));
-            btn_state = gpio_get_level(BTN_INPUT_IO);
-            if (btn_state != btn_state_prev) {
-                // btn kept its value
-                printf("debounced long btn: %d\n", btn_state);
+                // stable press, debounced.
+                // wait for 500ms for long press
+                vTaskDelay(pdMS_TO_TICKS(500));
+                btn_state = gpio_get_level(BTN_INPUT_IO);
+                if (btn_state != btn_state_prev) {
+                    printf("debounced long btn: %d\n", btn_state);
+                } else {
+                    printf("debounced short btn: %d\n", btn_state);
+                }
             }
         }
         
