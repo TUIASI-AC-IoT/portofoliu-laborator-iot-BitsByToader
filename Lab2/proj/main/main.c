@@ -29,6 +29,9 @@
 #define GPIO_LED            4
 #define GPIO_LED_PIN_SEL    (1ULL<<GPIO_LED)
 
+#define GPIO_BTN            2
+#define GPIO_BTN_PIN_SEL    (1ULL<<GPIO_BTN)
+
 #define CONFIG_ESP_WIFI_SSID      "lab-iot"
 #define CONFIG_ESP_WIFI_PASS      "IoT-IoT-IoT"
 #define CONFIG_ESP_MAXIMUM_RETRY  5
@@ -169,7 +172,6 @@ static void udp_task(void *pvParameters)
         ESP_LOGI(TAG, "Socket bound, port %d", CONFIG_LOCAL_PORT);
 
         while (1) {
-
             struct sockaddr source_addr;
             socklen_t socklen = sizeof(source_addr);
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, &source_addr, &socklen);
@@ -181,13 +183,13 @@ static void udp_task(void *pvParameters)
             }
             // Data received
             else {
-                 inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
+                inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
                 ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);
 
                 if (strncmp(rx_buffer, "GPIO4=", 6) == 0) {
-                    u8_t val = rx_buffer[6];
+                    u8_t val = rx_buffer[6] - '0';
                     ESP_LOGI(TAG, "got led cmd %c", val);
                     gpio_set_level(GPIO_LED, val);
                 }
@@ -203,6 +205,46 @@ static void udp_task(void *pvParameters)
         }
     }
     vTaskDelete(NULL);
+}
+
+static void btn_task(void *pvParameters)
+{
+    int addr_family = 0;
+    int ip_protocol = 0;
+
+    u8_t msg[8] = "GPIO4=0";
+    int cnt = 0;
+
+    struct sockaddr_in addr;
+    //local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    inet_pton(AF_INET, "192.168.89.43", &addr.sin_addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(CONFIG_LOCAL_PORT);
+    ip_protocol = IPPROTO_IP;
+    addr_family = AF_INET;
+
+    int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+        return;
+    }
+    ESP_LOGI(TAG, "Socket created");
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "SEND CANT CONNECT");
+        return;
+    }
+    ESP_LOGI(TAG, "UDP Send setup done.");
+
+    while(1) {
+        if ( !gpio_get_level(GPIO_BTN) ) {
+            cnt++;
+            msg[6] = cnt%2 + '0';
+            send(sock, msg, 7, 0);
+        }
+
+        vTaskDelay(200 / portTICK_PERIOD_MS);
+    }
 }
 
 void app_main(void)
@@ -229,6 +271,16 @@ void app_main(void)
         gpio_config(&led_cfg);
         gpio_set_level(GPIO_LED, 0);
 
+        gpio_config_t btn_cfg = {
+            GPIO_BTN_PIN_SEL,
+            GPIO_MODE_INPUT,
+            1,
+            0,
+            GPIO_INTR_DISABLE
+        };
+        gpio_config(&btn_cfg);
+
         xTaskCreate(udp_task, "udp_task", 4096, NULL, 5, NULL);
+        xTaskCreate(btn_task, "btn_task", 4096, NULL, 5, NULL);
     }
 }
