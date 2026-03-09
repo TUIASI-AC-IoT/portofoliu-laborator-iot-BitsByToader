@@ -26,6 +26,8 @@
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 
+#include "version.h"
+
 #define CONFIG_ESP_WIFI_SSID      "lab-iot"
 #define CONFIG_ESP_WIFI_PASS      "IoT-IoT-IoT"
 #define CONFIG_ESP_MAXIMUM_RETRY  5
@@ -33,6 +35,10 @@
 
 //TODO: Modificati adresa IP de mai jos pentru a coincide cu cea a PC-ul pe care rulati scriptul python
 #define CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL "https://192.168.89.48:53017/firmware.bin" 
+#define CONFIG_EXAMPLE_FIRMWARE_VERSION_URL "https://192.168.89.48:53017/version"
+
+#define MAX_HTTP_RECV_BUFFER 64
+static char receive_buffer[MAX_HTTP_RECV_BUFFER] = {0};
 
 #define GPIO_OUTPUT_IO 4
 #define GPIO_OUTPUT_PIN_SEL (1ULL<<GPIO_OUTPUT_IO)
@@ -166,37 +172,88 @@ bool wifi_init_sta(void)
     return false;
 }
 
-static void ota_task(void *pvParameters)
-{
-    xEventGroupWaitBits(s_event_start_ota, BIT_BTN_PRESSED, pdTRUE, pdTRUE, portMAX_DELAY);
+// Event handler to capture the data from the /version GET request
+esp_err_t _version_http_event_handler(esp_http_client_event_t *evt) {
+    switch(evt->event_id) {
+        case HTTP_EVENT_ON_DATA:
+            if (!esp_http_client_is_chunked_response(evt->client)) {
+                // Copy the version string into our buffer
+                strncpy(receive_buffer, (char*)evt->data, evt->data_len);
+                receive_buffer[evt->data_len] = '\0';
+            }
+            break;
+        default:
+            break;
+    }
+    return ESP_OK;
+}
 
-    ESP_LOGI(TAG, "Starting OTA example task");
+bool is_update_available(void) {
+    memset(receive_buffer, 0, MAX_HTTP_RECV_BUFFER);
+    int local_version = atoi(BUILD_NUMBER); 
+    int server_version = -1;
+
     esp_http_client_config_t config = {
-        .url = CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL,
-        .cert_pem = (char *)server_cert_pem_start,
-        .cert_len = 1422,
-        .event_handler = _http_event_handler,
-        .keep_alive_enable = true,
+        .url = CONFIG_EXAMPLE_FIRMWARE_VERSION_URL,
+        .event_handler = _version_http_event_handler,
         .use_global_ca_store = true,
         .skip_cert_common_name_check = true
     };
-
-    esp_https_ota_config_t ota_config = {
-        .http_config = &config,
-    };
     
-    ESP_ERROR_CHECK(esp_tls_init_global_ca_store());
-    ESP_ERROR_CHECK(esp_tls_set_global_ca_store((unsigned char*)server_cert_pem_start, server_cert_pem_end - server_cert_pem_start));
-
-    ESP_LOGI(TAG, "Attempting to download update from %s", config.url);
-    esp_err_t ret = esp_https_ota(&ota_config);
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "OTA Succeed, Rebooting...");
-        esp_restart();
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_err_t err = esp_http_client_perform(client);
+    
+    if (err == ESP_OK) {
+        server_version = atoi(receive_buffer);
+        ESP_LOGI(TAG, "Server version: %d, Local version: %d", server_version, local_version);
     } else {
-        ESP_LOGE(TAG, "Firmware upgrade failed");
+        ESP_LOGE(TAG, "Failed to fetch version from server: %s", esp_err_to_name(err));
     }
-    while (1) {
+    
+    esp_http_client_cleanup(client);
+    
+    return server_version > local_version;
+}
+
+static void ota_task(void *pvParameters)
+{
+    while(1) {
+        xEventGroupWaitBits(s_event_start_ota, BIT_BTN_PRESSED, pdTRUE, pdTRUE, portMAX_DELAY);
+        ESP_LOGI(TAG, "Starting OTA process.");
+        
+        ESP_ERROR_CHECK(esp_tls_init_global_ca_store());
+        ESP_ERROR_CHECK(esp_tls_set_global_ca_store((unsigned char*)server_cert_pem_start, server_cert_pem_end - server_cert_pem_start));
+
+        if (is_update_available()) {
+            esp_http_client_config_t config = {
+                .url = CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL,
+                // .cert_pem = (char *)server_cert_pem_start,
+                // .cert_len = 1422,
+                .event_handler = _http_event_handler,
+                .keep_alive_enable = true,
+                .use_global_ca_store = true,
+                .skip_cert_common_name_check = true
+            };
+
+            esp_https_ota_config_t ota_config = {
+                .http_config = &config,
+            };
+
+            ESP_LOGI(TAG, "Attempting to download update from %s", config.url);
+            esp_err_t ret = esp_https_ota(&ota_config);
+            if (ret == ESP_OK) {
+                ESP_LOGI(TAG, "OTA Succeed, Rebooting...");
+                esp_restart();
+            } else {
+                ESP_LOGE(TAG, "Firmware upgrade failed");
+            }
+        } else {
+            ESP_LOGI(TAG, "Device is up to date. No OTA required.");
+        }
+
+        // Free the CA store to prevent memory leaks if the task runs multiple times
+        esp_tls_free_global_ca_store();
+
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }

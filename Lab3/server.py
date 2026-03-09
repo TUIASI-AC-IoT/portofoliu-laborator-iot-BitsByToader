@@ -20,5 +20,18 @@ def firm():
 def hello():
     return "Hello World!"
 
+@app.route('/version')
+def get_version():
+    print('Start version request')
+    try:
+        # Read the build number from the 'versioning' file
+        with open("versioning", 'r') as f:
+            current_build = f.read().strip()
+            print(f"Current server build number: {current_build}")
+            return current_build
+    except FileNotFoundError:
+        print("Versioning file not found!")
+        return "0", 404
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=53017, ssl_context=('proj/ca_cert.pem', 'proj/ca_key.pem'), debug=True)
